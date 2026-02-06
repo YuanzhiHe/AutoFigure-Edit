@@ -8,6 +8,10 @@ numpy>=1.26
 Pillow>=10.0
 transformers>=4.39
 openai>=1.0
+einops>=0.7
+opencv-python>=4.8
+pycocotools>=2.0
+psutil>=5.9
 
 # ML stack (adjust to match your CUDA/PyTorch setup)
 torch>=2.1

@@ -2,6 +2,7 @@
 Paper Method 到 SVG 图标替换完整流程 (Label 模式增强版 + Box合并 + 多Prompt支持)
 
 支持的 API Provider：
+- openai: OpenAI API (https://api.openai.com/v1) - 使用 OpenAI SDK
 - openrouter: OpenRouter API (https://openrouter.ai/api/v1)
 - bianxie: Bianxie API (https://api.bianxie.ai/v1) - 使用 OpenAI SDK
 
@@ -41,12 +42,18 @@ Box合并功能 (--merge_threshold):
 
     # 使用 OpenRouter
     python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --api_key "sk-or-v1-xxx" --provider openrouter
+    
+    # 使用 OpenAI
+    python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --api_key "sk-proj-xxx" --provider openai
 
     # 使用 box 模式（传入坐标）
     python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --placeholder_mode box
 
     # 使用多个 SAM3 prompts 检测
     python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --sam_prompt "icon,diagram,arrow"
+
+    # 使用结构参考图（只读取流程结构，不模仿风格）
+    python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --structure_image_path /path/to/flowchart.png
 
     # 跳过步骤 4.6 优化（设置迭代次数为 0）
     python iou_autofigure.py --method_file paper_method.txt --output_dir ./output --optimize_iterations 0
@@ -86,6 +93,11 @@ from transformers import AutoModelForImageSegmentation
 # ============================================================================
 
 PROVIDER_CONFIGS = {
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "default_image_model": "gpt-image-1",
+        "default_svg_model": "gpt-5.2",
+    },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "default_image_model": "google/gemini-3-pro-image-preview",
@@ -98,7 +110,7 @@ PROVIDER_CONFIGS = {
     },
 }
 
-ProviderType = Literal["openrouter", "bianxie"]
+ProviderType = Literal["openai", "openrouter", "bianxie"]
 PlaceholderMode = Literal["none", "box", "label"]
 
 # Step 1 reference image settings (overridden by CLI)
@@ -135,10 +147,11 @@ def call_llm_text(
     Returns:
         LLM 响应文本
     """
+    if provider == "openai":
+        return _call_openai_text(prompt, api_key, model, base_url, max_tokens, temperature)
     if provider == "bianxie":
         return _call_bianxie_text(prompt, api_key, model, base_url, max_tokens, temperature)
-    else:  # openrouter
-        return _call_openrouter_text(prompt, api_key, model, base_url, max_tokens, temperature)
+    return _call_openrouter_text(prompt, api_key, model, base_url, max_tokens, temperature)
 
 
 def call_llm_multimodal(
@@ -165,10 +178,11 @@ def call_llm_multimodal(
     Returns:
         LLM 响应文本
     """
+    if provider == "openai":
+        return _call_openai_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
     if provider == "bianxie":
         return _call_bianxie_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
-    else:  # openrouter
-        return _call_openrouter_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
+    return _call_openrouter_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
 
 
 def call_llm_image_generation(
@@ -192,16 +206,121 @@ def call_llm_image_generation(
     Returns:
         生成的 PIL Image，失败返回 None
     """
+    if provider == "openai":
+        return _call_openai_image_generation(prompt, api_key, model, base_url, reference_image)
     if provider == "bianxie":
         return _call_bianxie_image_generation(prompt, api_key, model, base_url, reference_image)
-    else:  # openrouter
-        return _call_openrouter_image_generation(prompt, api_key, model, base_url, reference_image)
+    return _call_openrouter_image_generation(prompt, api_key, model, base_url, reference_image)
 
 
 # ============================================================================
 # Bianxie Provider 实现 (使用 OpenAI SDK)
 # ============================================================================
 
+def _call_openai_text(
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 16000,
+    temperature: float = 0.7,
+) -> Optional[str]:
+    """使用 OpenAI SDK 调用 OpenAI 文本接口"""
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(base_url=base_url, api_key=api_key)
+
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        return completion.choices[0].message.content if completion and completion.choices else None
+    except Exception as e:
+        print(f"[OpenAI] API 调用失败: {e}")
+        raise
+
+
+def _call_openai_multimodal(
+    contents: List[Any],
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 16000,
+    temperature: float = 0.7,
+) -> Optional[str]:
+    """使用 OpenAI SDK 调用 OpenAI 多模态接口"""
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(base_url=base_url, api_key=api_key)
+
+        message_content: List[Dict[str, Any]] = []
+        for part in contents:
+            if isinstance(part, str):
+                message_content.append({"type": "text", "text": part})
+            elif isinstance(part, Image.Image):
+                buf = io.BytesIO()
+                part.save(buf, format='PNG')
+                image_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+                message_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                })
+
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": message_content}],
+            max_completion_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        return completion.choices[0].message.content if completion and completion.choices else None
+    except Exception as e:
+        print(f"[OpenAI] 多模态 API 调用失败: {e}")
+        raise
+
+
+def _call_openai_image_generation(
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    reference_image: Optional[Image.Image] = None,
+) -> Optional[Image.Image]:
+    """使用 OpenAI SDK 调用 OpenAI 图像生成接口"""
+    try:
+        from openai import OpenAI
+
+        if reference_image is not None:
+            print("[OpenAI] 参考图像暂未启用，将忽略 reference_image。")
+
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        response = client.images.generate(
+            model=model,
+            prompt=prompt,
+        )
+
+        if not response or not response.data:
+            return None
+
+        image_base64 = response.data[0].b64_json
+        if not image_base64:
+            return None
+
+        image_data = base64.b64decode(image_base64)
+        return Image.open(io.BytesIO(image_data))
+    except Exception as e:
+        print(f"[OpenAI] 图像生成 API 调用失败: {e}")
+        raise
+
+
+# ============================================================================
+# Bianxie Provider 实现 (使用 OpenAI SDK)
+# ============================================================================
 def _call_bianxie_text(
     prompt: str,
     api_key: str,
@@ -514,6 +633,55 @@ def _call_openrouter_image_generation(
 # 步骤一：调用 LLM 生成图片
 # ============================================================================
 
+def extract_structure_from_image(
+    image_path: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    provider: ProviderType,
+) -> Optional[str]:
+    """
+    读取用户提供的流程图，仅提取结构信息（元素、关系、布局），不分析风格。
+    """
+    print("=" * 60)
+    print("结构参考：读取流程图结构（不使用风格）")
+    print("=" * 60)
+    print(f"Provider: {provider}")
+    print(f"模型: {model}")
+    print(f"结构参考图: {image_path}")
+
+    try:
+        ref_img = Image.open(image_path)
+    except Exception as e:
+        print(f"警告: 无法打开结构参考图，将跳过。原因: {e}")
+        return None
+
+    prompt = """You are analyzing a user-provided flowchart image.
+Extract ONLY the workflow structure (nodes, arrows, direction, and content). The shapes/boxes are optional and should NOT be copied as-is.
+Do NOT describe visual style, colors, or aesthetics.
+
+Return concise JSON with:
+- layout_direction: "LR" or "TB" or "mixed"
+- nodes: [{id, label, type}] where type is one of "start/end", "process", "decision", "data", "other"
+- edges: [{from, to, label}]
+- groups (optional): [{label, node_ids}]
+- notes (optional): brief structural notes
+If unsure, make best effort guesses. Keep it short."""
+
+    try:
+        content = call_llm_multimodal(
+            contents=[prompt, ref_img],
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            provider=provider,
+        )
+        return content
+    except Exception as e:
+        print(f"警告: 结构提取失败，将跳过。原因: {e}")
+        return None
+
+
 def generate_figure_from_method(
     method_text: str,
     output_path: str,
@@ -523,6 +691,7 @@ def generate_figure_from_method(
     provider: ProviderType,
     use_reference_image: Optional[bool] = None,
     reference_image_path: Optional[str] = None,
+    structure_summary: Optional[str] = None,
 ) -> str:
     """
     使用 LLM 生成学术风格图片
@@ -590,6 +759,16 @@ Below is the method section of the paper:
 {method_text}
 
 The figure should be engaging and using academic journal style with cute characters."""
+
+    if structure_summary:
+        prompt += f"""
+
+Use the following reference structure extracted from a user-provided flowchart.
+Important: Only follow the workflow structure (elements + relationships + direction + content). Boxes/shapes do not need to be preserved.
+Do NOT copy or imitate the visual style.
+Structure (JSON or bullet summary):
+{structure_summary}
+"""
 
     print(f"发送请求到: {base_url}")
 
@@ -840,6 +1019,8 @@ def segment_with_sam3(
     processor = Sam3Processor(model, device=device)
 
     image = Image.open(image_path)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
     original_size = image.size
     print(f"原图尺寸: {original_size[0]} x {original_size[1]}")
 
@@ -990,14 +1171,36 @@ class BriaRMBG2Remover:
 
         if self.model_path and self.model_path.exists():
             print(f"加载本地 RMBG 权重: {self.model_path}")
-            self.model = AutoModelForImageSegmentation.from_pretrained(
-                str(self.model_path), trust_remote_code=True,
-            ).eval().to(device)
+            load_kwargs = {"trust_remote_code": True, "low_cpu_mem_usage": False, "device_map": None}
+            if device == "cpu":
+                load_kwargs["dtype"] = torch.float32
+            prev_default_device = None
+            if hasattr(torch, "get_default_device") and hasattr(torch, "set_default_device"):
+                prev_default_device = torch.get_default_device()
+                torch.set_default_device("cpu")
+            try:
+                self.model = AutoModelForImageSegmentation.from_pretrained(
+                    str(self.model_path), **load_kwargs,
+                ).eval().to(device)
+            finally:
+                if prev_default_device is not None:
+                    torch.set_default_device(prev_default_device)
         else:
             print("从 HuggingFace 加载 RMBG-2.0 模型...")
-            self.model = AutoModelForImageSegmentation.from_pretrained(
-                "briaai/RMBG-2.0", trust_remote_code=True,
-            ).eval().to(device)
+            load_kwargs = {"trust_remote_code": True, "low_cpu_mem_usage": False, "device_map": None}
+            if device == "cpu":
+                load_kwargs["dtype"] = torch.float32
+            prev_default_device = None
+            if hasattr(torch, "get_default_device") and hasattr(torch, "set_default_device"):
+                prev_default_device = torch.get_default_device()
+                torch.set_default_device("cpu")
+            try:
+                self.model = AutoModelForImageSegmentation.from_pretrained(
+                    "briaai/RMBG-2.0", **load_kwargs,
+                ).eval().to(device)
+            finally:
+                if prev_default_device is not None:
+                    torch.set_default_device(prev_default_device)
 
         self.image_size = (1024, 1024)
         self.transform_image = transforms.Compose([
@@ -1054,7 +1257,11 @@ def crop_and_remove_background(
         print("警告: 没有检测到有效的 box")
         return []
 
-    remover = BriaRMBG2Remover(model_path=rmbg_model_path, output_dir=icons_dir)
+    remover = None
+    try:
+        remover = BriaRMBG2Remover(model_path=rmbg_model_path, output_dir=icons_dir)
+    except Exception as e:
+        print(f"警告: RMBG2 初始化失败，将跳过去背景。原因: {e}")
 
     icon_infos = []
     for box_info in boxes:
@@ -1069,7 +1276,14 @@ def crop_and_remove_background(
         crop_path = icons_dir / f"icon_{label_clean}.png"
         cropped.save(crop_path)
 
-        nobg_path = remover.remove_background(cropped, f"icon_{label_clean}")
+        if remover is not None:
+            try:
+                nobg_path = remover.remove_background(cropped, f"icon_{label_clean}")
+            except Exception as e:
+                print(f"警告: RMBG2 处理失败，将使用原始裁切图。原因: {e}")
+                nobg_path = str(crop_path)
+        else:
+            nobg_path = str(crop_path)
 
         icon_infos.append({
             "id": box_id,
@@ -1898,6 +2112,7 @@ def method_to_svg(
     provider: ProviderType = "bianxie",
     image_gen_model: str = None,
     svg_gen_model: str = None,
+    structure_image_path: Optional[str] = None,
     sam_prompts: str = "icon",
     min_score: float = 0.5,
     rmbg_model_path: Optional[str] = None,
@@ -1917,6 +2132,7 @@ def method_to_svg(
         provider: API 提供商
         image_gen_model: 生图模型
         svg_gen_model: SVG 生成模型
+        structure_image_path: 结构参考图（只读取流程结构，不模仿风格）
         sam_prompts: SAM3 文本提示，支持逗号分隔的多个prompt（如 "icon,diagram,arrow"）
         min_score: SAM3 最低置信度
         rmbg_model_path: RMBG 模型路径
@@ -1953,6 +2169,8 @@ def method_to_svg(
     print(f"输出目录: {output_dir}")
     print(f"生图模型: {image_gen_model}")
     print(f"SVG模型: {svg_gen_model}")
+    if structure_image_path:
+        print(f"结构参考图: {structure_image_path}")
     print(f"SAM提示词: {sam_prompts}")
     print(f"最低置信度: {min_score}")
     print(f"执行到步骤: {stop_after}")
@@ -1960,6 +2178,17 @@ def method_to_svg(
     print(f"优化迭代次数: {optimize_iterations}")
     print(f"Box合并阈值: {merge_threshold}")
     print("=" * 60)
+
+    # 可选：先提取结构参考图的流程结构
+    structure_summary = None
+    if structure_image_path:
+        structure_summary = extract_structure_from_image(
+            image_path=structure_image_path,
+            api_key=api_key,
+            model=svg_gen_model,
+            base_url=base_url,
+            provider=provider,
+        )
 
     # 步骤一：生成图片
     figure_path = output_dir / "figure.png"
@@ -1970,6 +2199,7 @@ def method_to_svg(
         model=image_gen_model,
         base_url=base_url,
         provider=provider,
+        structure_summary=structure_summary,
     )
 
     if stop_after == 1:
@@ -2169,7 +2399,7 @@ if __name__ == "__main__":
     # Provider 参数
     parser.add_argument(
         "--provider",
-        choices=["openrouter", "bianxie"],
+        choices=["openai", "openrouter", "bianxie"],
         default="bianxie",
         help="API 提供商（默认: bianxie）"
     )
@@ -2181,6 +2411,7 @@ if __name__ == "__main__":
     # 模型参数
     parser.add_argument("--image_model", default=None, help="生图模型（默认根据 provider 自动设置）")
     parser.add_argument("--svg_model", default=None, help="SVG生成模型（默认根据 provider 自动设置）")
+    parser.add_argument("--structure_image_path", default=None, help="结构参考图（只读取流程结构，不模仿风格）")
 
     # Step 1 参考图片参数
     parser.add_argument(
@@ -2257,6 +2488,7 @@ if __name__ == "__main__":
         provider=args.provider,
         image_gen_model=args.image_model,
         svg_gen_model=args.svg_model,
+        structure_image_path=args.structure_image_path,
         sam_prompts=args.sam_prompt,
         min_score=args.min_score,
         rmbg_model_path=args.rmbg_model_path,
