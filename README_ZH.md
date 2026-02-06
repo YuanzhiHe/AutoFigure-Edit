@@ -2,9 +2,9 @@
 
 <img src="img/logo.png" alt="AutoFigure-edit Logo" width="100%"/>
 
-# AutoFigure-edit: Generating and Editing Publication-Ready Scientific Illustrations [ICLR 2026]
+# AutoFigure: Generating and Refining Publication-Ready Scientific Illustrations [ICLR 2026]
 <p align="center">
-  <a href="README.md">English</a> | <a href="README_zh.md">中文</a>
+  <a href="README.md">English</a> | <a href="README_ZH.md">中文</a>
 </p>
 
 [![ICLR 2026](https://img.shields.io/badge/ICLR-2026-blue?style=for-the-badge&logo=openreview)](https://openreview.net/forum?id=5N3z9JQJKq)
@@ -107,10 +107,9 @@ AutoFigure2 的流程始于论文的方法文本，首先调用 **文本生成�
 # 1) 安装依赖
 pip install -r requirements.txt
 
-# 2) 单独安装 SAM3 (本项目未包含)
-git clone https://github.com/facebookresearch/sam3.git
-cd sam3
-pip install -e .
+# 2) 初始化 SAM3 子模块
+git submodule update --init --recursive
+pip install -e sam3
 ```
 
 **运行:**
@@ -141,7 +140,7 @@ AutoFigure-edit 提供了一个可视化的 Web 界面，旨在实现无缝的�
 <img src="img/demo_start.png" width="100%" alt="配置页面" style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px;"/>
 
 在起始页面左侧粘贴论文的方法文本。在右侧配置生成选项：
-*   **供应商 (Provider):** 选择 LLM 供应商（OpenRouter 或 Bianxie）。
+*   **供应商 (Provider):** 选择 LLM 供应商（OpenRouter、Bianxie 或 OpenAI）。
 *   **优化 (Optimize):** 设置 SVG 模板的优化迭代次数（日常使用建议设为 `0`）。
 *   **参考图片 (Reference Image):** 上传目标图片以启用风格迁移功能。
 
@@ -156,7 +155,7 @@ AutoFigure-edit 提供了一个可视化的 Web 界面，旨在实现无缝的�
 
 ## 🧩 SAM3 安装说明
 
-AutoFigure-edit 依赖 SAM3，但本项目**未**直接包含它。请遵循官方 SAM3 安装指南和先决条件。上游仓库目前针对 GPU 构建要求 Python 3.12+、PyTorch 2.7+ 和 CUDA 12.6。
+AutoFigure-edit 通过 `sam3` 子模块依赖 SAM3。请遵循官方 SAM3 安装指南和先决条件。上游仓库目前针对 GPU 构建要求 Python 3.12+、PyTorch 2.7+ 和 CUDA 12.6。
 
 SAM3 权重文件托管在 Hugging Face 上，下载前可能需要申请访问权限并进行认证（例如 `huggingface-cli login`）。
 
@@ -169,17 +168,19 @@ SAM3 权重文件托管在 Hugging Face 上，下载前可能需要申请访问�
 
 | 供应商 | Base URL | 备注 |
 |----------|----------|------|
+| **OpenAI** | `api.openai.com/v1` | 官方 OpenAI API |
 | **OpenRouter** | `openrouter.ai/api/v1` | 支持 Gemini/Claude/其他模型 |
 | **Bianxie** | `api.bianxie.ai/v1` | 兼容 OpenAI 接口 |
 
 常用 CLI 参数：
 
-- `--provider` (openrouter | bianxie)
+- `--provider` (openai | openrouter | bianxie)
 - `--image_model`, `--svg_model`
 - `--sam_prompt` (逗号分隔的提示词)
 - `--merge_threshold` (0 禁用合并)
 - `--optimize_iterations` (0 禁用优化)
 - `--reference_image_path` (可选)
+- `--structure_image_path` (可选，结构参考图)
 
 ---
 
@@ -202,17 +203,6 @@ AutoFigure-edit/
 └── img/                   # README 资源
 ```
 </details>
-
----
-
-## 🤝 社区与支持
-
-**微信交流群**  
-扫描二维码加入我们的社区。如果二维码过期，请添加微信号 `nauhcutnil` 或联系 `tuchuan@mail.hfut.edu.cn`。
-
-<img src="img/wechat.jpg" width="200" alt="WeChat QR Code"/>
-
----
 
 ## 📜 引用与许可
 
