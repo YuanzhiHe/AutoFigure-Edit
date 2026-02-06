@@ -112,7 +112,7 @@ pip install -r requirements.txt
 
 # 2) Init SAM3 submodule
 git submodule update --init --recursive
-pip install -e third_party/sam3
+pip install -e sam3
 ```
 
 **Run:**
