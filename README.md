@@ -110,10 +110,9 @@ Optionally, the SVG is iteratively refined by an **LLM optimizer** to better ali
 # 1) Install dependencies
 pip install -r requirements.txt
 
-# 2) Install SAM3 separately (not vendored in this repo)
-git clone https://github.com/facebookresearch/sam3.git
-cd sam3
-pip install -e .
+# 2) Init SAM3 submodule
+git submodule update --init --recursive
+pip install -e third_party/sam3
 ```
 
 **Run:**
@@ -144,7 +143,7 @@ AutoFigure-edit provides a visual web interface designed for seamless generation
 <img src="img/demo_start.png" width="100%" alt="Configuration Page" style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px;"/>
 
 On the start page, paste your paper's method text on the left. On the right, configure your generation settings:
-*   **Provider:** Select your LLM provider (OpenRouter or Bianxie).
+*   **Provider:** Select your LLM provider (OpenRouter, Bianxie, or OpenAI).
 *   **Optimize:** Set SVG template refinement iterations (recommend `0` for standard use).
 *   **Reference Image:** Upload a target image to enable style transfer.
 
@@ -159,7 +158,7 @@ The generation result loads directly into an integrated [SVG-Edit](https://githu
 
 ## 🧩 SAM3 Installation Notes
 
-AutoFigure-edit depends on SAM3 but does **not** vendor it. Please follow the
+AutoFigure-edit depends on SAM3 via the `third_party/sam3` submodule. Please follow the
 official SAM3 installation guide and prerequisites. The upstream repo currently
 targets Python 3.12+, PyTorch 2.7+, and CUDA 12.6 for GPU builds.
 
@@ -175,17 +174,19 @@ access and authenticate (e.g., `huggingface-cli login`) before download.
 
 | Provider | Base URL | Notes |
 |----------|----------|------|
+| **OpenAI** | `api.openai.com/v1` | Official OpenAI API |
 | **OpenRouter** | `openrouter.ai/api/v1` | Supports Gemini/Claude/others |
 | **Bianxie** | `api.bianxie.ai/v1` | OpenAI-compatible API |
 
 Common CLI flags:
 
-- `--provider` (openrouter | bianxie)
+- `--provider` (openai | openrouter | bianxie)
 - `--image_model`, `--svg_model`
 - `--sam_prompt` (comma-separated prompts)
 - `--merge_threshold` (0 disables merging)
 - `--optimize_iterations` (0 disables optimization)
 - `--reference_image_path` (optional)
+- `--structure_image_path` (optional, use a flowchart image to extract structure)
 
 ---
 
@@ -208,17 +209,6 @@ AutoFigure-edit/
 └── img/                   # README assets
 ```
 </details>
-
----
-
-## 🤝 Community & Support
-
-**WeChat Discussion Group**  
-Scan the QR code to join our community. If the code is expired, please add WeChat ID `nauhcutnil` or contact `tuchuan@mail.hfut.edu.cn`.
-
-<img src="img/wechat.jpg" width="200" alt="WeChat QR Code"/>
-
----
 
 ## 📜 Citation & License
 

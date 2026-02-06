@@ -1000,15 +1000,15 @@ def segment_with_sam3(
     print("步骤二：SAM3 分割 + 灰色填充+黑色边框+序号标记")
     print("=" * 60)
 
-    from sam3.model_builder import build_sam3_image_model
-    from sam3.model.sam3_image_processor import Sam3Processor
+    from third_party.sam3.model_builder import build_sam3_image_model
+    from third_party.sam3.model.sam3_image_processor import Sam3Processor
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    import sam3
-    sam3_dir = Path(sam3.__path__[0]) if hasattr(sam3, '__path__') else Path(sam3.__file__).parent
-    bpe_path = sam3_dir / "assets" / "bpe_simple_vocab_16e6.txt.gz"
+    import third_party.sam3 as sam3_pkg
+    sam3_root = Path(sam3_pkg.__file__).resolve().parent / "sam3"
+    bpe_path = sam3_root / "assets" / "bpe_simple_vocab_16e6.txt.gz"
     if not bpe_path.exists():
         bpe_path = None
         print("警告: 未找到 bpe 文件，使用默认路径")
