@@ -93,6 +93,11 @@ from transformers import AutoModelForImageSegmentation
 # ============================================================================
 
 PROVIDER_CONFIGS = {
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "default_image_model": "imagen-4.0-ultra-generate-001",
+        "default_svg_model": "gemini-3-pro-preview",
+    },
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "default_image_model": "gpt-image-1",
@@ -110,7 +115,7 @@ PROVIDER_CONFIGS = {
     },
 }
 
-ProviderType = Literal["openai", "openrouter", "bianxie"]
+ProviderType = Literal["gemini", "openai", "openrouter", "bianxie"]
 PlaceholderMode = Literal["none", "box", "label"]
 
 # Step 1 reference image settings (overridden by CLI)
@@ -147,6 +152,8 @@ def call_llm_text(
     Returns:
         LLM 响应文本
     """
+    if provider == "gemini":
+        return _call_gemini_text(prompt, api_key, model, base_url, max_tokens, temperature)
     if provider == "openai":
         return _call_openai_text(prompt, api_key, model, base_url, max_tokens, temperature)
     if provider == "bianxie":
@@ -178,6 +185,8 @@ def call_llm_multimodal(
     Returns:
         LLM 响应文本
     """
+    if provider == "gemini":
+        return _call_gemini_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
     if provider == "openai":
         return _call_openai_multimodal(contents, api_key, model, base_url, max_tokens, temperature)
     if provider == "bianxie":
@@ -206,6 +215,8 @@ def call_llm_image_generation(
     Returns:
         生成的 PIL Image，失败返回 None
     """
+    if provider == "gemini":
+        return _call_gemini_image_generation(prompt, api_key, model, base_url, reference_image)
     if provider == "openai":
         return _call_openai_image_generation(prompt, api_key, model, base_url, reference_image)
     if provider == "bianxie":
@@ -315,6 +326,195 @@ def _call_openai_image_generation(
         return Image.open(io.BytesIO(image_data))
     except Exception as e:
         print(f"[OpenAI] 图像生成 API 调用失败: {e}")
+        raise
+
+
+# ============================================================================
+# Gemini Provider 实现 (使用 requests)
+# ============================================================================
+
+def _get_gemini_api_url(base_url: str, model: str) -> str:
+    """构造 Gemini generateContent API URL"""
+    base = base_url.rstrip("/")
+    return f"{base}/models/{model}:generateContent"
+
+
+def _get_gemini_predict_url(base_url: str, model: str) -> str:
+    """构造 Gemini/Imagen predict API URL"""
+    base = base_url.rstrip("/")
+    return f"{base}/models/{model}:predict"
+
+
+def _get_gemini_headers(api_key: str) -> dict:
+    """获取 Gemini 请求头"""
+    return {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+
+
+def _call_gemini_text(
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 16000,
+    temperature: float = 0.7,
+) -> Optional[str]:
+    """使用 Gemini API 调用文本接口"""
+    api_url = _get_gemini_api_url(base_url, model)
+    headers = _get_gemini_headers(api_key)
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+        },
+    }
+    try:
+        resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
+        resp.raise_for_status()
+        data = resp.json()
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        for part in parts:
+            if "text" in part:
+                return part["text"]
+        return None
+    except Exception as e:
+        print(f"[Gemini] API 调用失败: {e}")
+        raise
+
+
+def _call_gemini_multimodal(
+    contents: List[Any],
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 16000,
+    temperature: float = 0.7,
+) -> Optional[str]:
+    """使用 Gemini API 调用多模态接口"""
+    api_url = _get_gemini_api_url(base_url, model)
+    headers = _get_gemini_headers(api_key)
+    parts: List[Dict[str, Any]] = []
+    for part in contents:
+        if isinstance(part, str):
+            parts.append({"text": part})
+        elif isinstance(part, Image.Image):
+            buf = io.BytesIO()
+            part.save(buf, format="PNG")
+            image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": image_b64,
+                }
+            })
+
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+        },
+    }
+    try:
+        resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
+        resp.raise_for_status()
+        data = resp.json()
+        resp_parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        for part in resp_parts:
+            if "text" in part:
+                return part["text"]
+        return None
+    except Exception as e:
+        print(f"[Gemini] 多模态 API 调用失败: {e}")
+        raise
+
+
+def _call_gemini_image_generation(
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    reference_image: Optional[Image.Image] = None,
+) -> Optional[Image.Image]:
+    """使用 Gemini/Imagen API 调用图像生成接口"""
+    headers = _get_gemini_headers(api_key)
+
+    def _parse_inline_image(data: dict) -> Optional[Image.Image]:
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        for part in parts:
+            inline = part.get("inline_data") or part.get("inlineData")
+            if inline and "data" in inline:
+                image_data = base64.b64decode(inline["data"])
+                return Image.open(io.BytesIO(image_data))
+        return None
+
+    def _parse_predict_image(data: dict) -> Optional[Image.Image]:
+        preds = data.get("predictions", [])
+        for pred in preds:
+            if "bytesBase64Encoded" in pred:
+                image_data = base64.b64decode(pred["bytesBase64Encoded"])
+                return Image.open(io.BytesIO(image_data))
+            if "image" in pred and isinstance(pred["image"], dict):
+                if "bytesBase64Encoded" in pred["image"]:
+                    image_data = base64.b64decode(pred["image"]["bytesBase64Encoded"])
+                    return Image.open(io.BytesIO(image_data))
+            if "data" in pred:
+                image_data = base64.b64decode(pred["data"])
+                return Image.open(io.BytesIO(image_data))
+        return None
+
+    # Gemini image models (e.g., gemini-3-pro-image-preview) use generateContent
+    if "image" in model or model.startswith("gemini-3-pro-image"):
+        api_url = _get_gemini_api_url(base_url, model)
+        parts: List[Dict[str, Any]] = [{"text": prompt}]
+        if reference_image is not None:
+            buf = io.BytesIO()
+            reference_image.save(buf, format="PNG")
+            image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": image_b64,
+                }
+            })
+
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+        }
+        try:
+            resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
+            resp.raise_for_status()
+            data = resp.json()
+            img = _parse_inline_image(data)
+            if img is not None:
+                return img
+            return None
+        except Exception as e:
+            print(f"[Gemini] 图像生成 API 调用失败: {e}")
+            raise
+
+    # Imagen models use predict
+    api_url = _get_gemini_predict_url(base_url, model)
+    payload = {
+        "instances": [{"prompt": prompt}],
+    }
+    try:
+        resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
+        resp.raise_for_status()
+        data = resp.json()
+        img = _parse_predict_image(data)
+        if img is not None:
+            return img
+        # Fallback to generateContent style response if returned
+        img = _parse_inline_image(data)
+        if img is not None:
+            return img
+        return None
+    except Exception as e:
+        print(f"[Gemini] 图像生成 API 调用失败: {e}")
         raise
 
 
@@ -1000,14 +1200,19 @@ def segment_with_sam3(
     print("步骤二：SAM3 分割 + 灰色填充+黑色边框+序号标记")
     print("=" * 60)
 
-    from third_party.sam3.model_builder import build_sam3_image_model
-    from third_party.sam3.model.sam3_image_processor import Sam3Processor
+    from sam3.model_builder import build_sam3_image_model
+    from sam3.model.sam3_image_processor import Sam3Processor
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    import third_party.sam3 as sam3_pkg
-    sam3_root = Path(sam3_pkg.__file__).resolve().parent / "sam3"
+    import sam3 as sam3_pkg
+    if hasattr(sam3_pkg, "__path__"):
+        sam3_root = Path(list(sam3_pkg.__path__)[0]).resolve()
+    elif getattr(sam3_pkg, "__file__", None):
+        sam3_root = Path(sam3_pkg.__file__).resolve().parent
+    else:
+        sam3_root = Path(__file__).resolve().parent / "sam3"
     bpe_path = sam3_root / "assets" / "bpe_simple_vocab_16e6.txt.gz"
     if not bpe_path.exists():
         bpe_path = None
@@ -2399,7 +2604,7 @@ if __name__ == "__main__":
     # Provider 参数
     parser.add_argument(
         "--provider",
-        choices=["openai", "openrouter", "bianxie"],
+        choices=["gemini", "openai", "openrouter", "bianxie"],
         default="bianxie",
         help="API 提供商（默认: bianxie）"
     )

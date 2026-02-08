@@ -140,7 +140,7 @@ AutoFigure-edit 提供了一个可视化的 Web 界面，旨在实现无缝的�
 <img src="img/demo_start.png" width="100%" alt="配置页面" style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px;"/>
 
 在起始页面左侧粘贴论文的方法文本。在右侧配置生成选项：
-*   **供应商 (Provider):** 选择 LLM 供应商（OpenRouter、Bianxie 或 OpenAI）。
+*   **供应商 (Provider):** 选择 LLM 供应商（OpenRouter、Bianxie、OpenAI 或 Gemini）。
 *   **优化 (Optimize):** 设置 SVG 模板的优化迭代次数（日常使用建议设为 `0`）。
 *   **参考图片 (Reference Image):** 上传目标图片以启用风格迁移功能。
 
@@ -168,13 +168,14 @@ SAM3 权重文件托管在 Hugging Face 上，下载前可能需要申请访问�
 
 | 供应商 | Base URL | 备注 |
 |----------|----------|------|
+| **Gemini** | `generativelanguage.googleapis.com/v1beta` | Google AI Studio Gemini API（文本/多模态: gemini-3-pro-preview；图像: imagen-4.0-ultra-generate-001） |
 | **OpenAI** | `api.openai.com/v1` | 官方 OpenAI API |
 | **OpenRouter** | `openrouter.ai/api/v1` | 支持 Gemini/Claude/其他模型 |
 | **Bianxie** | `api.bianxie.ai/v1` | 兼容 OpenAI 接口 |
 
 常用 CLI 参数：
 
-- `--provider` (openai | openrouter | bianxie)
+- `--provider` (gemini | openai | openrouter | bianxie)
 - `--image_model`, `--svg_model`
 - `--sam_prompt` (逗号分隔的提示词)
 - `--merge_threshold` (0 禁用合并)

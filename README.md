@@ -143,7 +143,7 @@ AutoFigure-edit provides a visual web interface designed for seamless generation
 <img src="img/demo_start.png" width="100%" alt="Configuration Page" style="border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px;"/>
 
 On the start page, paste your paper's method text on the left. On the right, configure your generation settings:
-*   **Provider:** Select your LLM provider (OpenRouter, Bianxie, or OpenAI).
+*   **Provider:** Select your LLM provider (OpenRouter, Bianxie, OpenAI, or Gemini).
 *   **Optimize:** Set SVG template refinement iterations (recommend `0` for standard use).
 *   **Reference Image:** Upload a target image to enable style transfer.
 
@@ -174,13 +174,14 @@ access and authenticate (e.g., `huggingface-cli login`) before download.
 
 | Provider | Base URL | Notes |
 |----------|----------|------|
+| **Gemini** | `generativelanguage.googleapis.com/v1beta` | Google AI Studio Gemini API (text/multimodal: gemini-3-pro-preview; image: imagen-4.0-ultra-generate-001) |
 | **OpenAI** | `api.openai.com/v1` | Official OpenAI API |
 | **OpenRouter** | `openrouter.ai/api/v1` | Supports Gemini/Claude/others |
 | **Bianxie** | `api.bianxie.ai/v1` | OpenAI-compatible API |
 
 Common CLI flags:
 
-- `--provider` (openai | openrouter | bianxie)
+- `--provider` (gemini | openai | openrouter | bianxie)
 - `--image_model`, `--svg_model`
 - `--sam_prompt` (comma-separated prompts)
 - `--merge_threshold` (0 disables merging)
