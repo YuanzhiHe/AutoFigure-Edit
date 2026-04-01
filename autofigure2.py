@@ -95,7 +95,7 @@ from transformers import AutoModelForImageSegmentation
 PROVIDER_CONFIGS = {
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "default_image_model": "imagen-4.0-ultra-generate-001",
+        "default_image_model": "gemini-3-pro-image-preview",
         "default_svg_model": "gemini-3-pro-preview",
     },
     "openai": {
@@ -345,6 +345,18 @@ def _get_gemini_predict_url(base_url: str, model: str) -> str:
     return f"{base}/models/{model}:predict"
 
 
+def _gemini_uses_predict_endpoint(model: str) -> bool:
+    """Only Imagen-family models use the predict endpoint."""
+    normalized = model.strip().lower()
+    return normalized.startswith("imagen-")
+
+
+def _gemini_supports_image_generation(model: str) -> bool:
+    """Check whether the selected Gemini-family model can generate images."""
+    normalized = model.strip().lower()
+    return normalized.startswith("imagen-") or normalized.endswith("-image-preview") or normalized.endswith("-flash-image")
+
+
 def _get_gemini_headers(api_key: str) -> dict:
     """获取 Gemini 请求头"""
     return {
@@ -440,15 +452,23 @@ def _call_gemini_image_generation(
     reference_image: Optional[Image.Image] = None,
 ) -> Optional[Image.Image]:
     """使用 Gemini/Imagen API 调用图像生成接口"""
+    if not _gemini_supports_image_generation(model):
+        raise ValueError(
+            f"Gemini 图像生成模型不支持当前模型: {model}. "
+            "请改用 gemini-3-pro-image-preview 或 imagen-4.0-generate-001。"
+        )
+
     headers = _get_gemini_headers(api_key)
 
     def _parse_inline_image(data: dict) -> Optional[Image.Image]:
-        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        for part in parts:
-            inline = part.get("inline_data") or part.get("inlineData")
-            if inline and "data" in inline:
-                image_data = base64.b64decode(inline["data"])
-                return Image.open(io.BytesIO(image_data))
+        candidates = data.get("candidates", [])
+        for candidate in candidates:
+            parts = candidate.get("content", {}).get("parts", [])
+            for part in parts:
+                inline = part.get("inline_data") or part.get("inlineData")
+                if inline and "data" in inline:
+                    image_data = base64.b64decode(inline["data"])
+                    return Image.open(io.BytesIO(image_data))
         return None
 
     def _parse_predict_image(data: dict) -> Optional[Image.Image]:
@@ -466,8 +486,8 @@ def _call_gemini_image_generation(
                 return Image.open(io.BytesIO(image_data))
         return None
 
-    # Gemini image models (e.g., gemini-3-pro-image-preview) use generateContent
-    if "image" in model or model.startswith("gemini-3-pro-image"):
+    # Gemini-family models use generateContent. Only Imagen uses predict.
+    if not _gemini_uses_predict_endpoint(model):
         api_url = _get_gemini_api_url(base_url, model)
         parts: List[Dict[str, Any]] = [{"text": prompt}]
         if reference_image is not None:
@@ -483,6 +503,9 @@ def _call_gemini_image_generation(
 
         payload = {
             "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+            },
         }
         try:
             resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
@@ -491,6 +514,7 @@ def _call_gemini_image_generation(
             img = _parse_inline_image(data)
             if img is not None:
                 return img
+            print(f"[Gemini] 图像生成响应中未找到 inline image，返回 keys: {list(data.keys())}")
             return None
         except Exception as e:
             print(f"[Gemini] 图像生成 API 调用失败: {e}")
